@@ -1,0 +1,4 @@
+# This is a generated file; do not edit or check into version control.
+integration_test=/opt/flutter/packages/integration_test/
+native_device_orientation=/home/jaween/.pub-cache/hosted/pub.dev/native_device_orientation-2.0.3/
+renderer=/mnt/extra/dev/streamline/renderer/
