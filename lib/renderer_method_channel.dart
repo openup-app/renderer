@@ -88,14 +88,4 @@ class MethodChannelRenderer extends RendererPlatform {
       return result;
     }
   }
-
-  @override
-  Future<void> addFrame(Uint8List frame) async {
-    await methodChannel.invokeMethod<void>('addFrame', {'frame': frame});
-  }
-
-  @override
-  Future<void> test() async {
-    await methodChannel.invokeMethod<void>('test');
-  }
 }

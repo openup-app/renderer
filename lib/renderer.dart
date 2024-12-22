@@ -30,14 +30,6 @@ class Renderer {
 
   Future<int> get sensorQuaterTurns async =>
       ((await sensorOrientation() ?? 0) + 360) % 360 ~/ 90;
-
-  Future<void> addFrame(Uint8List frame) {
-    return RendererPlatform.instance.addFrame(frame);
-  }
-
-  Future<void> test() {
-    return RendererPlatform.instance.test();
-  }
 }
 
 class TextureDisplay extends StatelessWidget {

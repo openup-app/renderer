@@ -14,9 +14,15 @@
 
 #include "include/renderer/fl_my_texture_gl.h"
 #include "include/renderer/opengl_renderer.h"
+
+struct FFmpegProcess
+{
+  FILE *input;
+  std::thread thread;
+};
+
 std::unique_ptr<OpenGLRenderer> openglRenderer;
-FlTexture *fl_texture;
-int my_texture_name;
+FFmpegProcess my_ffmpeg_process;
 
 #define RENDERER_PLUGIN(obj)                                     \
   (G_TYPE_CHECK_INSTANCE_CAST((obj), renderer_plugin_get_type(), \
@@ -32,6 +38,51 @@ struct _RendererPlugin
 G_DEFINE_TYPE(RendererPlugin,
               renderer_plugin,
               g_object_get_type())
+
+struct ProcessPipes
+{
+  FILE *input;
+  FILE *output;
+};
+
+ProcessPipes popen2(const char *command)
+{
+  std::array<int, 2> in_pipe{};
+  std::array<int, 2> out_pipe{};
+
+  if (pipe(in_pipe.data()) < 0 || pipe(out_pipe.data()) < 0)
+  {
+    return {nullptr, nullptr};
+  }
+
+  pid_t pid = fork();
+  if (pid < 0)
+  {
+    return {nullptr, nullptr};
+  }
+
+  if (pid == 0)
+  { // Child process
+    dup2(in_pipe[0], STDIN_FILENO);
+    dup2(out_pipe[1], STDOUT_FILENO);
+
+    close(in_pipe[0]);
+    close(in_pipe[1]);
+    close(out_pipe[0]);
+    close(out_pipe[1]);
+
+    execl("/bin/sh", "sh", "-c", command, nullptr);
+    exit(1);
+  }
+
+  // Parent process
+  close(in_pipe[0]);
+  close(out_pipe[1]);
+
+  return {
+      fdopen(in_pipe[1], "w"),
+      fdopen(out_pipe[0], "r")};
+}
 
 void postToMainThread(std::function<void()> callback)
 {
@@ -50,44 +101,47 @@ void postToMainThread(std::function<void()> callback)
              cb); // Pass callback pointer to main thread
 }
 
-void launchFFmpegWithCallback(const char *command, std::function<void(const std::vector<uint8_t> &)> callback)
+FFmpegProcess launchFFmpegWithCallback(const char *command,
+                                       std::function<void(const std::vector<uint8_t> &)> callback)
 {
-  std::thread([=]()
-              {
-        FILE* pipe = popen(command, "r");
-        if (!pipe) {
-            perror("Failed to open pipe");
-            return;
-        }
+  auto pipes = popen2(command);
+  if (!pipes.input || !pipes.output)
+  {
+    perror("Failed to open pipes");
+    return {nullptr, {}};
+  }
 
+  FILE *input = pipes.input;
+  std::thread t([output = pipes.output, callback]()
+                {
         const size_t bufferSize = 4096;
         std::vector<uint8_t> buffer(bufferSize);
         std::vector<uint8_t> accumulatedData;
 
         while (true) {
-            size_t bytesRead = fread(buffer.data(), 1, bufferSize, pipe);
+            size_t bytesRead = fread(buffer.data(), 1, bufferSize, output);
             if (bytesRead == 0) break;
 
-            // Append to the accumulated data
-            accumulatedData.insert(accumulatedData.end(), buffer.begin(), buffer.begin() + bytesRead);
+            accumulatedData.insert(accumulatedData.end(), 
+                                 buffer.begin(), 
+                                 buffer.begin() + bytesRead);
 
-            const size_t frameSize = 1920*1080*4;
+            const size_t frameSize = 1920 * 1080 * 4;
             if (accumulatedData.size() >= frameSize) {
-                 postToMainThread([accumulatedData, callback](){
-                    // This code will now run on the main thread
+                postToMainThread([accumulatedData, callback]() {
                     callback(accumulatedData);
                 });
-                accumulatedData.clear(); // Clear after emitting
+                accumulatedData.clear();
             }
         }
 
-        // Emit any remaining data (if needed)
         if (!accumulatedData.empty()) {
             callback(accumulatedData);
         }
 
-        pclose(pipe); })
-      .detach(); // Detach thread for asynchronous execution
+        fclose(output); });
+
+  return {input, std::move(t)};
 }
 
 // Called when a method call is received from Flutter.
@@ -122,48 +176,42 @@ static void renderer_plugin_handle_method_call(
     FlMyTextureGL *t =
         fl_my_texture_gl_new(GL_TEXTURE_2D, texture_name, width, height);
     g_autoptr(FlTexture) texture = FL_TEXTURE(t);
-    fl_texture = texture;
-    my_texture_name = texture_name;
     FlTextureRegistrar *texture_registrar = self->texture_registrar;
     fl_texture_registrar_register_texture(texture_registrar, texture);
     fl_texture_registrar_mark_texture_frame_available(texture_registrar,
                                                       texture);
+
+    auto ffmpeg_process = launchFFmpegWithCallback(
+        "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i pipe:0 -pix_fmt rgba -f rawvideo -y -",
+        [texture_registrar = self->texture_registrar, texture_name, texture](const std::vector<uint8_t> &data)
+        {
+          openglRenderer->update_texture_with_frame(texture_name, data.data(), 1920, 1080);
+          fl_texture_registrar_mark_texture_frame_available(texture_registrar,
+                                                            texture);
+        });
+    my_ffmpeg_process = std::move(ffmpeg_process);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+
     g_autoptr(FlValue) result =
         fl_value_new_int(reinterpret_cast<int64_t>(texture));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
   }
-  else if (strcmp(method, "addFrame") == 0)
+  else if (strcmp(method, "addH265Nal") == 0)
   {
     FlValue *args = fl_method_call_get_args(method_call);
-    FlValue *frame_value = fl_value_lookup_string(args, "frame");
-    if (frame_value == NULL)
+    const uint8_t *frame = fl_value_get_uint8_list(args);
+    const size_t frame_length = fl_value_get_length(args);
+    if (frame == NULL)
     {
-      g_autoptr(FlValue) error_message = fl_value_new_string("Missing frame parameter");
+      g_autoptr(FlValue) error_message = fl_value_new_string("Missing h265 data argument");
       response = FL_METHOD_RESPONSE(fl_method_error_response_new(
-          "INVALID_ARGUMENT", "Missing frame parameter", error_message));
+          "INVALID_ARGUMENT", "Missing h265 data argument", error_message));
     }
-    const uint8_t *frame = fl_value_get_uint8_list(frame_value);
-    openglRenderer->update_texture_with_frame(my_texture_name, frame, 1920, 1080);
-    FlTextureRegistrar *texture_registrar = self->texture_registrar;
-    fl_texture_registrar_mark_texture_frame_available(texture_registrar,
-                                                      fl_texture);
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
-  }
-  else if (strcmp(method, "test") == 0)
-  {
-    launchFFmpegWithCallback(
-        "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i /home/openup/iphone_test_2.h265 -pix_fmt rgba -f rawvideo -y -",
-        [texture_registrar = self->texture_registrar](const std::vector<uint8_t> &data)
-        {
-          // Process decoded frame data
-          // fwrite(data.data(), 1, data.size(), stdout); // Print received data
-          // std::clog << data << std::endl;
-          // printf("Received %zu bytes\n", data.size());
-          openglRenderer->update_texture_with_frame(my_texture_name, data.data(), 1920, 1080);
-          fl_texture_registrar_mark_texture_frame_available(texture_registrar,
-                                                            fl_texture);
-        });
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    else
+    {
+      fwrite(frame, frame_length, 1, my_ffmpeg_process.input);
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    }
   }
   else
   {
