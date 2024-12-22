@@ -48,6 +48,10 @@ abstract class RendererPlatform extends PlatformInterface {
   Future<void> addFrame(Uint8List frame) {
     throw UnimplementedError('addFrame() has not been implemented');
   }
+
+  Future<void> test() {
+    throw UnimplementedError('test() has not been implemented');
+  }
 }
 
 class ParameterSets {

@@ -7,6 +7,11 @@
 #include <iostream>
 #include <memory>
 
+#include <cstdio>
+#include <vector>
+#include <functional>
+#include <thread>
+
 #include "include/renderer/fl_my_texture_gl.h"
 #include "include/renderer/opengl_renderer.h"
 std::unique_ptr<OpenGLRenderer> openglRenderer;
@@ -27,6 +32,63 @@ struct _RendererPlugin
 G_DEFINE_TYPE(RendererPlugin,
               renderer_plugin,
               g_object_get_type())
+
+void postToMainThread(std::function<void()> callback)
+{
+  // Allocate a heap object to ensure the callback survives across threads
+  std::function<void()> *cb = new std::function<void()>(std::move(callback));
+
+  // Post the callback to the main thread using g_idle_add
+  g_idle_add([](gpointer user_data) -> gboolean
+             {
+               // Cast the user data to the function pointer
+               auto cb = static_cast<std::function<void()> *>(user_data);
+               (*cb)();                // Execute the callback
+               delete cb;              // Cleanup memory after execution
+               return G_SOURCE_REMOVE; // Remove from idle list (it runs only once)
+             },
+             cb); // Pass callback pointer to main thread
+}
+
+void launchFFmpegWithCallback(const char *command, std::function<void(const std::vector<uint8_t> &)> callback)
+{
+  std::thread([=]()
+              {
+        FILE* pipe = popen(command, "r");
+        if (!pipe) {
+            perror("Failed to open pipe");
+            return;
+        }
+
+        const size_t bufferSize = 4096;
+        std::vector<uint8_t> buffer(bufferSize);
+        std::vector<uint8_t> accumulatedData;
+
+        while (true) {
+            size_t bytesRead = fread(buffer.data(), 1, bufferSize, pipe);
+            if (bytesRead == 0) break;
+
+            // Append to the accumulated data
+            accumulatedData.insert(accumulatedData.end(), buffer.begin(), buffer.begin() + bytesRead);
+
+            const size_t frameSize = 1920*1080*4;
+            if (accumulatedData.size() >= frameSize) {
+                 postToMainThread([accumulatedData, callback](){
+                    // This code will now run on the main thread
+                    callback(accumulatedData);
+                });
+                accumulatedData.clear(); // Clear after emitting
+            }
+        }
+
+        // Emit any remaining data (if needed)
+        if (!accumulatedData.empty()) {
+            callback(accumulatedData);
+        }
+
+        pclose(pipe); })
+      .detach(); // Detach thread for asynchronous execution
+}
 
 // Called when a method call is received from Flutter.
 static void renderer_plugin_handle_method_call(
@@ -81,12 +143,26 @@ static void renderer_plugin_handle_method_call(
           "INVALID_ARGUMENT", "Missing frame parameter", error_message));
     }
     const uint8_t *frame = fl_value_get_uint8_list(frame_value);
-    // size_t frame_length = fl_value_get_length(frame_value);
-    // std::clog << "Frame length is " << frame_length << std::endl;
     openglRenderer->update_texture_with_frame(my_texture_name, frame, 1920, 1080);
     FlTextureRegistrar *texture_registrar = self->texture_registrar;
     fl_texture_registrar_mark_texture_frame_available(texture_registrar,
                                                       fl_texture);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  }
+  else if (strcmp(method, "test") == 0)
+  {
+    launchFFmpegWithCallback(
+        "ffmpeg -hide_banner -probesize 4K -i /home/openup/iphone_test_2.h265 -pix_fmt rgba -f rawvideo -y -",
+        [texture_registrar = self->texture_registrar](const std::vector<uint8_t> &data)
+        {
+          // Process decoded frame data
+          // fwrite(data.data(), 1, data.size(), stdout); // Print received data
+          // std::clog << data << std::endl;
+          // printf("Received %zu bytes\n", data.size());
+          openglRenderer->update_texture_with_frame(my_texture_name, data.data(), 1920, 1080);
+          fl_texture_registrar_mark_texture_frame_available(texture_registrar,
+                                                            fl_texture);
+        });
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   }
   else

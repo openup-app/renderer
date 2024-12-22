@@ -34,6 +34,10 @@ class Renderer {
   Future<void> addFrame(Uint8List frame) {
     return RendererPlatform.instance.addFrame(frame);
   }
+
+  Future<void> test() {
+    return RendererPlatform.instance.test();
+  }
 }
 
 class TextureDisplay extends StatelessWidget {
