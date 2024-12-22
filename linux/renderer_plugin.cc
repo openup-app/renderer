@@ -152,7 +152,7 @@ static void renderer_plugin_handle_method_call(
   else if (strcmp(method, "test") == 0)
   {
     launchFFmpegWithCallback(
-        "ffmpeg -hide_banner -probesize 4K -i /home/openup/iphone_test_2.h265 -pix_fmt rgba -f rawvideo -y -",
+        "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i /home/openup/iphone_test_2.h265 -pix_fmt rgba -f rawvideo -y -",
         [texture_registrar = self->texture_registrar](const std::vector<uint8_t> &data)
         {
           // Process decoded frame data
