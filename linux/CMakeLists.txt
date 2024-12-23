@@ -16,6 +16,7 @@ list(APPEND PLUGIN_SOURCES
   "renderer_plugin.cc"
   "fl_my_texture_gl.cc"
   "opengl_renderer.cpp"
+  "h265_decoder.cpp"
 )
 
 # Define the plugin library target. Its name must not be changed (see comment

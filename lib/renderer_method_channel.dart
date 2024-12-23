@@ -70,22 +70,20 @@ class MethodChannelRenderer extends RendererPlatform {
 
   @override
   Future<bool?> needsTransformation() async {
-    if (Platform.isIOS) {
-      return Future.value(true);
-    } else {
+    if (Platform.isAndroid) {
       final result =
           await methodChannel.invokeMethod<bool>('needsTransformation');
       return result;
     }
+    return Future.value(true);
   }
 
   @override
   Future<int?> sensorOrientation() async {
-    if (Platform.isIOS) {
-      return Future.value(0);
-    } else {
+    if (Platform.isAndroid) {
       final result = await methodChannel.invokeMethod<int>('sensorOrientation');
       return result;
     }
+    return Future.value(0);
   }
 }
