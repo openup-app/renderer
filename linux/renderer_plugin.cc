@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #include "include/renderer/renderer_plugin.h"
 #include "include/renderer/h265_decoder.h"
 
@@ -34,6 +35,14 @@ static void renderer_plugin_handle_method_call(
 
   if (strcmp(method, "init") == 0)
   {
+    glewExperimental = GL_TRUE; // Optional, enables more extensions
+    if (glewInit() != GLEW_OK)
+    {
+      g_autoptr(FlValue) error_message = fl_value_new_string("Missing width or height parameter");
+      response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+          "FAILURE", "Failed to init GLEW", error_message));
+    }
+
     GdkWindow *window = gtk_widget_get_parent_window(GTK_WIDGET(self->fl_view));
     decoder = new H265Decoder(window, self->texture_registrar);
     FlValue *args = fl_method_call_get_args(method_call);
