@@ -150,15 +150,42 @@ _FlTexture *H265Decoder::init(int width, int height)
     fl_texture_registrar_mark_texture_frame_available(texture_registrar,
                                                       texture);
 
-    auto ffmpeg_process = launchFFmpegWithCallback(
-        "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i pipe:0 -pix_fmt rgba -f rawvideo -y -",
-        thread_run,
-        [this, renderer = std::move(openglRenderer), texture_name, texture](const std::vector<uint8_t> &data)
-        {
-            renderer->update_texture_with_frame(texture_name, data.data(), 1920, 1080);
-            fl_texture_registrar_mark_texture_frame_available(texture_registrar, texture);
-        });
-    this->ffmpeg_process = std::move(ffmpeg_process);
+    if (width == 1)
+    {
+        auto ffmpeg_process = launchFFmpegWithCallback(
+            "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i /home/openup/source.h265 -f rawvideo -y /dev/null",
+            thread_run,
+            [](const std::vector<uint8_t> &data)
+            {
+                // renderer->update_texture_with_frame(texture_name, data.data(), 1920, 1080);
+                // fl_texture_registrar_mark_texture_frame_available(texture_registrar, texture);
+            });
+        this->ffmpeg_process = std::move(ffmpeg_process);
+    }
+    else if (width == 2)
+    {
+        auto ffmpeg_process = launchFFmpegWithCallback(
+            "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i /home/openup/source.h265 -pix_fmt yuv420p -f rawvideo -y /dev/null",
+            thread_run,
+            [](const std::vector<uint8_t> &data)
+            {
+                // renderer->update_texture_with_frame(texture_name, data.data(), 1920, 1080);
+                // fl_texture_registrar_mark_texture_frame_available(texture_registrar, texture);
+            });
+        this->ffmpeg_process = std::move(ffmpeg_process);
+    }
+    else if (width == 3)
+    {
+        auto ffmpeg_process = launchFFmpegWithCallback(
+            "ffmpeg -hide_banner -probesize 4K -c:v hevc -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i /home/openup/source.h265 -pix_fmt rgba -f rawvideo -y /dev/null",
+            thread_run,
+            [](const std::vector<uint8_t> &data)
+            {
+                // renderer->update_texture_with_frame(texture_name, data.data(), 1920, 1080);
+                // fl_texture_registrar_mark_texture_frame_available(texture_registrar, texture);
+            });
+        this->ffmpeg_process = std::move(ffmpeg_process);
+    }
     return texture;
 }
 
