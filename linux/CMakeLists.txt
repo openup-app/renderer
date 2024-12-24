@@ -45,7 +45,7 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 find_package( OpenGL REQUIRED )
 target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GL)
-S
+
 find_package(GLEW REQUIRED)
 target_link_libraries(${PLUGIN_NAME} PRIVATE GLEW::GLEW)
 
